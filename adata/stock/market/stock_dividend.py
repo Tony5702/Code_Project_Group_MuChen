@@ -69,9 +69,9 @@ class StockDividend(object):
             return null_df
 
         # 4. 封装数据
-        result_df = pd.DataFrame(data=body, columns=['公告日', '分红方案', '除权除息日', '信息'])
+        result_df = pd.DataFrame(data=body, columns=['公告日', '分红方案', '信息'])
         result_df['stock_code'] = stock_code
-        rename_columns = {'公告日': 'report_date', '分红方案': 'dividend_plan', '除权除息日': 'ex_dividend_date'}
+        rename_columns = {'公告日': 'report_date', '分红方案': 'dividend_plan'}
         result_df = result_df.rename(columns=rename_columns)
         # 5. 数据清洗
         result_df = result_df[result_df.dividend_plan != '利润不分配']
