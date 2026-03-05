@@ -72,6 +72,9 @@ class SunRequests(object):
         parsed_url = urlparse(url)
         domain = parsed_url.netloc
         
+        wait_time = 0
+        
+        # 第一次获取锁，检查频率限制并计算等待时间
         with self._rate_limit_lock:
             now = time.time()
             if domain not in self._rate_limit:
@@ -92,9 +95,22 @@ class SunRequests(object):
             if rate_info['count'] >= rate_info['limit']:
                 # 计算需要等待的时间
                 wait_time = rate_info['reset_time'] - now
-                if wait_time > 0:
-                    time.sleep(wait_time)
-                # 重置计数
+        
+        # 释放锁后执行等待，避免阻塞其他线程
+        if wait_time > 0:
+            time.sleep(wait_time)
+        
+        # 等待完成后，重新获取锁并重置计数和增加计数
+        with self._rate_limit_lock:
+            now = time.time()
+            rate_info = self._rate_limit[domain]
+            
+            # 再次检查是否需要重置计数（可能在等待期间已经过期）
+            if now >= rate_info['reset_time']:
+                rate_info['count'] = 0
+                rate_info['reset_time'] = now + 60
+            else:
+                # 重置计数（因为之前超过了限制）
                 rate_info['count'] = 0
                 rate_info['reset_time'] = now + 60
             
