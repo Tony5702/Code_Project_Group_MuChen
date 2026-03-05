@@ -10,6 +10,7 @@
 
 import threading
 import time
+from urllib.parse import urlparse
 
 import requests
 
@@ -26,6 +27,7 @@ class SunProxy(object):
             with SunProxy._instance_lock:
                 if not hasattr(SunProxy, "_instance"):
                     SunProxy._instance = object.__new__(cls)
+        return SunProxy._instance
 
     @classmethod
     def set(cls, key, value):
@@ -45,6 +47,59 @@ class SunRequests(object):
     def __init__(self, sun_proxy: SunProxy = None) -> None:
         super().__init__()
         self.sun_proxy = sun_proxy
+        self._rate_limit = {}
+        self._rate_limit_default = 30  # 默认每分钟30次请求
+        self._rate_limit_lock = threading.Lock()
+
+    def set_rate_limit(self, domain, limit):
+        """
+        设置域名的请求频率限制
+        :param domain: 域名
+        :param limit: 每分钟请求次数限制
+        """
+        with self._rate_limit_lock:
+            self._rate_limit[domain] = {
+                'limit': limit,
+                'count': 0,
+                'reset_time': time.time() + 60
+            }
+
+    def _check_rate_limit(self, url):
+        """
+        检查请求频率限制
+        :param url: 请求URL
+        """
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc
+        
+        with self._rate_limit_lock:
+            now = time.time()
+            if domain not in self._rate_limit:
+                self._rate_limit[domain] = {
+                    'limit': self._rate_limit_default,
+                    'count': 0,
+                    'reset_time': now + 60
+                }
+            
+            rate_info = self._rate_limit[domain]
+            
+            # 检查是否需要重置计数
+            if now >= rate_info['reset_time']:
+                rate_info['count'] = 0
+                rate_info['reset_time'] = now + 60
+            
+            # 检查是否超过限制
+            if rate_info['count'] >= rate_info['limit']:
+                # 计算需要等待的时间
+                wait_time = rate_info['reset_time'] - now
+                if wait_time > 0:
+                    time.sleep(wait_time)
+                # 重置计数
+                rate_info['count'] = 0
+                rate_info['reset_time'] = now + 60
+            
+            # 增加计数
+            rate_info['count'] += 1
 
     def request(self, method='get', url=None, times=3, retry_wait_time=1588, proxies=None, wait_time=None, **kwargs):
         """
@@ -58,9 +113,11 @@ class SunRequests(object):
         :param kwargs: 其它 requests 参数，用法相同
         :return: res
         """
-        # 1. 获取设置代理
+        # 1. 检查频率限制
+        self._check_rate_limit(url)
+        # 2. 获取设置代理
         proxies = self.__get_proxies(proxies)
-        # 2. 请求数据结果
+        # 3. 请求数据结果
         res = None
         for i in range(times):
             if wait_time:
@@ -83,6 +140,8 @@ class SunRequests(object):
         ip = SunProxy.get('ip')
         proxy_url = SunProxy.get('proxy_url')
         if not ip and is_proxy and proxy_url:
+            # 对代理URL也应用频率限制
+            self._check_rate_limit(proxy_url)
             ip = requests.get(url=proxy_url).text.replace('\r\n', '') \
                 .replace('\r', '').replace('\n', '').replace('\t', '')
         if is_proxy and ip:
